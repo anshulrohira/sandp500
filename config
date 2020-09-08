@@ -1,0 +1,12 @@
+{
+"SandP500LIST_Source" : {
+                "WIKI" : "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+                "CUSTOM":[]
+            },
+"SandPTicker_Source" : {
+                "FileName":"",
+                "Mapping":{},
+                "Date":""
+            },
+  "QuandlApiKey" : "sQRmhq7edKaskyZJ5zHS"
+}

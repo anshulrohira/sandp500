@@ -1,0 +1,141 @@
+import bs4 as bs
+import pickle
+import requests
+import lxml
+import pandas as pd
+import argparse
+import quandl
+import  numpy as np
+import pandas_datareader as web
+from time import sleep
+from datetime import datetime as dt, timedelta
+import sys
+import json
+import Core.ParseFeedFile as fileParser
+import Core.ParseApiFeed as apiParser
+import Common.DBHandler as db
+
+
+
+if __name__ == '__main__':
+    print("The Process Has Started ")
+    tickers = []
+    sp500 = pd.DataFrame()
+    """
+    This section is use to define all the command line arguments
+    """
+    parser = argparse.ArgumentParser(description="Fetches S&P 500 data")
+    parser.add_argument("-snpS", "--snpSource", default=None, dest="snpSource",
+                        help="Provide Source for S&P Ticker names : Wiki/Custom")
+    parser.add_argument("-a", "--api", type = str, dest="api",
+                        help="Provide API Source for S&P Ticker data")
+    parser.add_argument("-f", "--feedFile",action="store_true", dest="file",default=None,
+                        help="Provide FeedFile Source for S&P Ticker data")
+    parser.add_argument("--start", type=str, dest="start",
+                        help="Earliest date (YYYY-MM-DD) to include")
+    parser.add_argument("--end", type=str, dest="end",
+                        default="today",
+                        help='Last date (YYYY-MM-DD or "today") to include [default: "today"]')
+    args = parser.parse_args()
+
+    if args.end == "today":
+        args.end = dt.now()
+    else:
+        args.end = dt.strptime(args.end, "%Y-%m-%d")
+
+    if args.start:
+        args.start = dt.strptime(args.start, "%Y-%m-%d")
+    else:
+        #args.start = dt.now() - timedelta(days=1)
+        args.start = dt.now()
+
+
+    """
+    This section is use to retrive all the S&P Ticker names from either wikipedia or a custom list or a stored pickle
+    """
+
+    def save_sp500_tickers(WikiSorcePath):
+        resp = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
+        soup = bs.BeautifulSoup(resp.text, "lxml")
+        table = soup.find("table", {"class": "wikitable sortable"})
+        tickers = []
+        for row in table.findAll("tr")[1:]:
+            ticker = row.findAll("td")[0].text
+            tickers.append(ticker)
+        with open("../CachedPickles/sp500tickers.pickle", "wb") as f:
+            pickle.dump(tickers, f)
+
+        return tickers
+
+    try:
+        with open('config', 'r') as f:
+            config = json.load(f)
+
+        if args.snpSource == "WIKI":
+            tickers = save_sp500_tickers(config['SandP500LIST_Source']['WIKI'])
+        elif args.snpSource == "CUSTOM":
+            tickers = config['SandP500LIST_Source']['CUSTOM']
+        else:
+            with open("../CachedPickles/sp500tickers.pickle", "rb") as f:
+                tickers = pickle.load(f)
+
+    except Exception as e:
+        print(e)
+
+
+    """
+    This section is use to identify from which api the data is to be pulled from 
+    """
+
+    if args.api:
+        sp500 = apiParser.parseApis(args.api , tickers , args.start , args.end)
+
+
+    """
+     This section is use to identify from which type of feed file the data is to be pulled from 
+     """
+
+    if args.file:
+        fileName = config['SandPTicker_Source']['FileName']
+        fileFormat = config['SandPTicker_Source']['FileName'].split('.')[-1]
+        if fileFormat == "csv":
+            sp500 = fileParser.parseCSVFile(fileName ,config['SandPTicker_Source']['Mapping'], config['SandPTicker_Source']['Date'] )
+        if fileFormat == "xml":
+            sp500 = fileParser.parseXMLFile(fileName ,config['SandPTicker_Source']['Mapping'], config['SandPTicker_Source']['Date'] )
+        if fileFormat == "xlxs":
+            sp500 = fileParser.parseExcelFile(fileName ,config['SandPTicker_Source']['Mapping'], config['SandPTicker_Source']['Date'] )
+
+    if type(sp500) != type(None):
+        db.Df_to_MySQL(sp500)
+
+    print("The Process Has Ended ")
+
+
+    """
+    
+    This section would be used to calculate and add the Returns column before injecting the code into the DB 
+    
+    
+    
+
+    sp500["Returns"] = None
+    uniqueTickers = sp500['Name'].unique().tolist()
+    sp500 = sp500.sort_index(ascending=False)
+    sp500.reset_index(inplace=True)
+    earliestDate = str(sp500.Date.min())
+    #historicalDataDF = db.fetch_historical_data(str(dt.strptime(earliestDate[:-9], "%Y-%m-%d") - timedelta(days = 730))[:-9])
+    for t in uniqueTickers:
+        dframe = sp500[sp500["Name"] == t]
+
+        for index,row in dframe.iterrows():
+            if not dframe[dframe["Date"] == (row["Date"] - timedelta(days = 730))].empty :
+                val = ((row["Open"] - dframe[dframe["Date"] == (row["Date"] - timedelta(days = 730))]["Open"]) / row["Open"]) * 100
+                val = float(val)
+                sp500.loc[((sp500["Name"] == t) & (sp500["Date"] == row["Date"])),"Returns"] = val
+            elif not historicalDataDF[historicalDataDF["Date"] == (row["Date"] - timedelta(days = 730))].empty:
+                sp500[(sp500["Name"] == t) & (sp500["Date"] == row["Date"])]["Returns"] = ((row["Open"] - historicalDataDF[historicalDataDF["Date"] == (row["Date"] - timedelta(days = 730))][
+                    "Open"]) / row["Open"]) * 100
+
+    sp500.set_index("Date" , inplace= True)
+    
+    """
